@@ -2,6 +2,7 @@
 .section .text
 
 .globl setupBrk
+.globl _start
 
 # obtém endereço do brk
 setupBrk:
@@ -14,4 +15,10 @@ setupBrk:
 
     popq %rbp
     ret
+
+_start:
+    call setupBrk 
+    movq %rax, %rdi
+    movq $60, %rax
+    syscall
 
