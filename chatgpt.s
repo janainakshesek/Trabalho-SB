@@ -16,8 +16,8 @@ setup_brk:
     pushq %rbp
     movq %rsp, %rbp
 
-    movq $12, %rax
-    movq $0, %rdi
+    movq $12, %rax    # Número da chamada de sistema para brk
+    movq $0, %rdi     # Novo endereço de brk (0 para obter o atual)
     syscall
 
     movq %rax, original_brk
@@ -42,11 +42,11 @@ merge_block:
         movq %r8, %r11
         # pulando a header
         addq $16, %r11
-        # pssando pro próximo bloco
+        # pulando para o próximo bloco
         addq %r10, %r11
 
         cmpq topo_pilha, %r11
-        je _itera_merge
+        ja _itera_merge
        
         cmpq $1, (%r11)
         je _itera_merge
@@ -59,14 +59,17 @@ merge_block:
         movq %r10, 8(%r8)
         
         _itera_merge:
+        # pega o tamanho do bloco e coloca em %r9
         movq 8(%r8), %r9
+        # avança o ponteiro para o próximo bloco
         addq %r9, %r8
         addq $16, %r8
         
         cmpq topo_pilha, %r8
-        je _fim_merge
+        ja _fim_merge
+        jmp _while_merge
+        
     _fim_merge:
-
     popq %rbp
     ret
 
@@ -88,21 +91,9 @@ memory_free:
     pushq %rbp
     movq %rsp, %rbp
 
-    cmpq original_brk, %rdi
-    jl _erro
+    movq $0, -16(%rdi)    # Marca o bloco como livre
 
-    # tentativa de desalocação acima do que fizemos 
-    cmpq topo_pilha, %rdi
-    jge _erro
-
-    movq $0, -16(%rdi)
-    jmp _fim_free
-
-    _erro:
-    # retorna 0 em caso de erro
-    movq $0, %rax
-
-    _fim_free:
+    call merge_block
 
     popq %rbp
     ret
@@ -117,7 +108,9 @@ open_space:
 
     addq $16, %rdi
     # atualizando topo da pilha
-    addq topo_pilha, %rdi
+    movq topo_pilha, %rax
+    addq %rdi, %rax
+    movq %rax, %rdi
     movq $12, %rax
     syscall
     movq %rax, topo_pilha
@@ -125,8 +118,8 @@ open_space:
     # retorna o começo do bloco sem o header
     subq %r8, %rax
     
-    movq $1, -16(%rax)
-    movq %r8, -8(%rax)
+    movq $1, (%rax)
+    movq %r8, 8(%rax)
 
     popq %rbp
     ret
@@ -135,47 +128,31 @@ add_info:
     pushq %rbp
     movq %rsp, %rbp
 
-    # r15 tamanho - tamanho a gente quer
-    movq %r12, %r15
-    subq %rdi, %r15
+    movq %rdi, %r8
+    subq (%rdi), %r15
 
     cmpq $16, %r15
     jl _soh_enfiar
 
-# nova header
-    # %r10 está com o endereço do bloco com o tamanho escolhido
+    # nova header
     movq %r10, %r14
     addq $16, %r14
-    addq %rdi, %r14
+    addq (%rdi), %r14
 
     movq $0, (%r14)
-    # subtrai a nova header
-    subq $16, %r15
     movq %r15, 8(%r14)
-
-    movq $1, (%r10)
-    # se deu pra criar numa nova header
-    movq %rdi, 8(%r10)
-    jmp _fim_add_info
 
     _soh_enfiar:
         # lembrando que em r10 temos o endereço do bloco que achamos
         movq $1, (%r10)
-        # se deu pra criar numa nova header
-        movq %r12, 8(%r10)
-        
-    _fim_add_info: 
-
-    addq $16, %r10
-    movq $12, %rax
-    movq %r10, %rdi
-    syscall
+        # r13 só para poder acessar o valor já que não pode acessar duas memórias
+        movq %r12, %r13
+        movq %r13, 8(%r10)
 
     popq %rbp
     ret
 
-
-#  Procura bloco livre com tamanho igual ou maior que a requisição
+# Procura bloco livre com tamanho igual ou maior que a requisição
 search_block:
     pushq %rbp
     movq %rsp, %rbp
@@ -192,12 +169,12 @@ search_block:
 
     # percorre todos os blocos da heap 
     _while_search:
-        # primeiro endereço está ocupado??
+        # verifica se o bloco está ocupado
         cmpq $1, (%r8)
         je _itera_search
 
         # compara o tamanho dos blocos
-        cmpq %r12, 8(%r8) 
+        cmpq %r12, 8(%r8)
         jl _itera_search
         
         # se o tamanho for maior atualiza o valor
@@ -208,33 +185,28 @@ search_block:
         _itera_search:
         # pega o tamanho do bloco e coloca em %r9
         movq 8(%r8), %r9
-        # soma o tamanho do bloco analisado nele mesmo, brk pula para o proximo bloco 
+        # avança o ponteiro para o próximo bloco
         addq %r9, %r8
         addq $16, %r8
         
         cmpq topo_pilha, %r8
-        je _fim_search
-
+        ja _fim_search
         jmp _while_search
+        
     _fim_search:
 
-    # se não tiver bloco alocado livre chama a de abrir
+    # se não tiver bloco alocado livre chama a função de abrir
     cmpq $0, %r12
     je _n_call
-
-    cmpq %rdi, %r12
-    jl _n_call
 
     call add_info
     jmp _cu
 
+    # temos o bloco 
     _n_call:
         call open_space
 
-    # enfiar as informações pq a gente tem o tamanho necessário
-
     _cu:
-
     popq %rbp
     ret
 
@@ -247,4 +219,3 @@ memory_alloc:
 
     popq %rbp
     ret
-
